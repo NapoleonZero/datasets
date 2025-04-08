@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 if [ $# -le 2 ]; then
   echo "Invalid syntax" 
@@ -20,6 +20,7 @@ COLS=$(tput cols)
 function progress() {
   p=$1
   str=" $p%\r"
+  echo -n "█"
   for i in $( seq 0 $(( COLS * p / 100 - ${#str} )) ); do
     echo -n "█"
   done
@@ -55,15 +56,62 @@ function restart() {
 
 function isready() {
   echo "isready" >& ${COPROC[1]}
-  IFS= read -t 5 -u ${COPROC[0]} -r ready
-  return [[ $ready == readyok* ]]
+
+  # while ! read -t 1.0 -u ${COPROC[0]} -r ready; do
+  #   echo "waiting"
+  # done
+
+  while ! read -t 1.0 -u ${COPROC[0]} -r ready; do
+    echo "Sending ready command again"
+    echo "isready" >& ${COPROC[1]}
+  done
+
+  # if [[ $ready != readyok* ]]; then
+  #   echo "Engine not ready: $fen"
+  #   echo "$ready"
+  # fi
+  # echo "Ready response is: $ready"
+  [[ $ready == readyok* ]]
+}
+#
+# SIGCHLD trap handler to detect when a child terminates.
+handle_sigchld() {
+    # We want to check if our coprocess died.
+    # Using a non-blocking wait here lets us reap terminated children.
+    # (Adjust this code if your shell supports wait -n or similar.)
+
+    # isready || 1
+    if [[ $? -ne 0 ]]; then
+      echo "Restarting due to coprocess crashing"
+      restart
+    fi
 }
 
+# Set up the SIGCHLD trap.
+trap 'handle_sigchld' SIGCHLD
+
 while IFS= read -r fen; do
+  # echo
+  # echo "$fen"
+  # echo "ucinewgame" >& ${COPROC[1]}
+
+  # read -t 5 -u ${COPROC[0]} -r line || echo "Error clearing TT"
+
+  # if ! isready; then
+  #   echo "Engine not ready 1: $fen"
+  #   exit 1
+  # fi
+
   echo "position fen $fen" >& ${COPROC[1]}
 
-  # if [[ isready ]]; then
-  #   echo "Engine not ready: $fen"
+  while [[ $? -ne 0 ]]; do 
+    restart
+    echo "position fen $fen" >& ${COPROC[1]}
+  done
+
+  # if ! isready; then
+  #   echo "Engine not ready 2: $fen"
+  #   exit 1
   # fi
 
   # print a progress bar if this is the main thread
@@ -72,7 +120,7 @@ while IFS= read -r fen; do
   fi
 
   echo "go depth $DEPTH" >& ${COPROC[1]}
-  while ! read -t 0.5 -u ${COPROC[0]} -r line; do
+  while ! read -t 1.0 -u ${COPROC[0]} -r line; do
     echo "Sending go command again: $fen"
     echo "go depth $DEPTH" >& ${COPROC[1]}
   done
@@ -82,13 +130,14 @@ while IFS= read -r fen; do
     if [[ $line == bestmove* ]]; then # Done searching
       break
     elif [[ $line == Position* ]]; then # Error in the position
+      echo "Process failed with fen: $line"
       restart
       break
     elif [[ $line != info* ]]; then
       echo "Unexpected output with position $fen: $line"
       break
     else 
-      read -u ${COPROC[0]} -r line || break
+      read -t 5.0 -u ${COPROC[0]} -r line || break
     fi
   done 
   COUNT=$((COUNT+1))

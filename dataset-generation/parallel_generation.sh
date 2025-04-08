@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 if [ $# != 3 ]; then
   echo "Invalid syntax" 
@@ -27,10 +27,20 @@ PIDS=()
 # hide cursor to better show the progress bar
 tput civis
 
-#TODO: if $THREADS > 10, use suffixes of length > 2
+PREFIX="x0"
+
+if [ $THREADS -gt 100 ]; then
+  PREFIX=$PREFIX"0"
+fi
+
+PREFIX_WIDTH=$(( ${#THREADS} < 2 ? 2 : ${#THREADS} )) # length of the THREADS string (min value is 2)
+
+#TODO: if $THREADS > 100, use suffixes of length > 1
 MAIN_THREAD=true
 for i in $( seq 0 $(( THREADS - 1 ))); do
-  ./generate_dataset.sh "x0$i.part" $DEPTH $MAIN_THREAD &
+  printf -v PREFIX "x%0*d" "$PREFIX_WIDTH" $i
+  # ./generate_dataset.sh "$PREFIX.part" $DEPTH $MAIN_THREAD &
+  ./generate_dataset.py "$PREFIX.part" $DEPTH $MAIN_THREAD &
   PIDS[${i}]=$!
   MAIN_THREAD=false
 done
