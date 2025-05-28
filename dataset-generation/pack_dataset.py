@@ -11,14 +11,14 @@ This script expects each CSV row to have exactly 16 fields in this order:
   -  3 signed   8-bit integers (b)
   -  1 half-precision float   (e)
 And packs them in big-endian order (`>QQQQQQQQQQQQbbbe`).
+
+Optionally, the script can encode `N` additional integers corresponding to a 12bit representation of a from-to encoded
+move by passing the --pv-depth N argument. Each move will be encoded as a 16 bit unsigned short.
 """
 import argparse
 import csv
 import struct
 import sys
-# Fixed struct format: 12×uint64, 3×int8, 1×float16
-FMT = '>QQQQQQQQQQQQbbbe'
-EXTRA_VALUES = [15] # depth is stored in position 15 in the CSV, we discard this one
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -31,9 +31,11 @@ def parse_args():
                         help='Path to output binary file')
     parser.add_argument('-s', '--skip-header', action='store_true',
                         help='Skip the first row (header) of the CSV file')
+    parser.add_argument('-p', '--pv-depth', type=int, default=0,
+                        help='Depth of the principal variation to encode (default: 0)')
     return parser.parse_args()
 
-def pack_csv_to_bin(input_path: str, output_path: str, skip_header: bool = False) -> None:
+def pack_csv_to_bin(input_path: str, output_path: str, skip_header: bool = False, pv_depth: int = 0) -> None:
     """
     Reads rows from input CSV and writes packed binary data to output.
     Each row must have exactly 16 fields matching the fixed struct format (+ extra unused fields).
@@ -43,9 +45,17 @@ def pack_csv_to_bin(input_path: str, output_path: str, skip_header: bool = False
         output_path: Path to the output binary file
         skip_header: Whether to skip the first row of the CSV file
     """
+    # Fixed struct format: 12×uint64, 3×int8, 1×float16
+    FMT = '>QQQQQQQQQQQQbbbe'
+    EXTRA_VALUES = [15] # depth is stored in position 15 in the CSV, we discard this one
+
+    if pv_depth > 0:
+        FMT += pv_depth*'H' # unsigned short (16 bits) for encoding the moves
+
     record_size = struct.calcsize(FMT)
     # Count expected number of values from format: 12 Q's + 3 b's + 1 e
-    field_count = FMT.count('Q') + FMT.count('b') + FMT.count('e') + len(EXTRA_VALUES)
+    # field_count = FMT.count('Q') + FMT.count('b') + FMT.count('e') + len(EXTRA_VALUES)
+    field_count = len(FMT[1:]) + len(EXTRA_VALUES)
     processed_count = 0
     
     with open(input_path, newline='') as csvfile, \
@@ -65,10 +75,12 @@ def pack_csv_to_bin(input_path: str, output_path: str, skip_header: bool = False
                 b_vals = [int(x)   for x in row[12:15]]
                 extra_vals = [row[i] for i in EXTRA_VALUES] # discard this values (depth)
                 e_val  = float(row[16]) / 100.0
+                moves = [int(x) for x in row[17:]]
+
             except ValueError as e:
                 sys.exit(f"Error: Line {lineno} conversion failed: {e}")
             # Pack into binary according to the fixed format
-            packed = struct.pack(FMT, *q_vals, *b_vals, e_val)
+            packed = struct.pack(FMT, *q_vals, *b_vals, e_val, *moves)
             if len(packed) != record_size:
                 sys.exit(f"Error: Packed size {len(packed)} != expected {record_size}")
             binfile.write(packed)
@@ -81,7 +93,7 @@ def pack_csv_to_bin(input_path: str, output_path: str, skip_header: bool = False
 def main():
     args = parse_args()
     try:
-        pack_csv_to_bin(args.input, args.output, args.skip_header)
+        pack_csv_to_bin(args.input, args.output, args.skip_header, args.pv_depth)
     except Exception as e:
         sys.exit(f"Fatal error: {e}")
 
