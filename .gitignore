@@ -1,3 +1,6 @@
 NapoleonPP*
 CCRL/
-
+.direnv/
+*.csv
+*.zst
+*.bin
